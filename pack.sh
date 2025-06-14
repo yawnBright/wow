@@ -34,7 +34,7 @@ clean_output() {
   echo "清理输出目录..."
   mkdir -p "${OUTPUT:?}" || handle_error "创建输出目录"
   # 使用${OUTPUT:?}确保变量不为空，防止扩展为/*
-  rm -rf "${OUTPUT:?}"/* || handle_error "清理输出目录"
+  rm -rf "${OUTPUT:?}"/*
   echo "输出目录清理完成"
 }
 
@@ -54,7 +54,7 @@ build_swift_updater() {
   if [ ! -f "$UPDATER_SOURCE" ]; then
     handle_error "找不到更新器源代码"
   fi
-  swiftc "$UPDATER_SOURCE" -o "$UPDATER_OUTPUT" || handle_error "Swift更新器构建"
+  swiftc -O "$UPDATER_SOURCE" -o "$UPDATER_OUTPUT" || handle_error "Swift更新器构建"
   if [ ! -f "$UPDATER_OUTPUT" ]; then
     handle_error "找不到编译后的更新器"
   fi
