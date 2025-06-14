@@ -3,7 +3,6 @@
 # 项目安装路径
 proj_path="$HOME/Pictures/wow"
 # 可执行文件下载地址
-# bin_url="https://gitee.com/yawnbright/pub_space/releases/download/wall_paper_test/wow"
 bin_url="https://gitee.com/yawnbright/pub_space/releases/download/wall_paper_test2.0/wow"
 # 可执行文件名
 bin_name="wow"
@@ -27,7 +26,7 @@ else
 fi
 
 # 定义新的定时任务
-NEW_CRON="*/1 * * * * $bin" # 每1分钟执行一次
+NEW_CRON="*/5 * * * * $bin" # 每5分钟执行一次
 
 # 临时文件存储现有crontab
 TEMP_CRON=$(mktemp)
@@ -46,3 +45,13 @@ fi
 
 # 清理临时文件
 rm "$TEMP_CRON"
+
+# 添加环境变量
+CONFIG_FILE="$HOME/.bashrc"
+if [[ "$SHELL" == *"zsh"* ]]; then
+  CONFIG_FILE="$HOME/.zshrc"
+fi
+
+touch "$CONFIG_FILE"
+
+echo "export PATH=$proj_path:$PATH" >>"$CONFIG_FILE"

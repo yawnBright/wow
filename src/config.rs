@@ -8,17 +8,20 @@ const BING_PAPER_RANDOM_URL: &str = "https://bing.img.run/rand_uhd.php";
 
 #[derive(Encode, Decode)]
 pub struct Config {
-    source: i8,
-    freq: i8,
+    source: u8,
+    // 秒
+    freq: usize,
     update_at: SystemTime,
+    cur_img: String,
 }
 
 impl Config {
     pub fn default() -> Self {
         Config {
             source: 1,
-            freq: 12,
-            update_at: SystemTime::UNIX_EPOCH,
+            freq: 12 * 60 * 60,
+            update_at: SystemTime::now(),
+            cur_img: String::new(),
         }
     }
     /// 从`path`加载配置文件，
@@ -52,8 +55,16 @@ impl Config {
         }
     }
 
-    pub fn get_freq(&self) -> i8 {
+    pub fn set_url(&mut self, i: u8) {
+        self.source = i;
+    }
+
+    pub fn get_freq(&self) -> usize {
         self.freq
+    }
+
+    pub fn set_freq(&mut self, freq: usize) {
+        self.freq = freq;
     }
 
     pub fn get_update_at(&self) -> SystemTime {
@@ -61,6 +72,14 @@ impl Config {
     }
     pub fn set_update_at(&mut self, t: SystemTime) {
         self.update_at = t;
+    }
+
+    pub fn get_cur_img(&self) -> &str {
+        &self.cur_img
+    }
+
+    pub fn set_cur_img(&mut self, cur_img: &str) {
+        self.cur_img = cur_img.to_string();
     }
 
     pub fn flush(&self, path: &str) -> ErrInfo {
@@ -74,8 +93,4 @@ impl Config {
             Err(e) => ErrInfo::new(&format!("{}", e)),
         }
     }
-
-    // pub fn get_img_save_path(&self) -> String {
-    //     return self.img_save_path.clone();
-    // }
 }

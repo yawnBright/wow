@@ -1,12 +1,14 @@
 use crate::config::Config;
 use std::{
-    fs::File,
+    fs::{self, File},
     io::Write,
+    process::Command,
     time::{Duration, SystemTime},
 };
 use termion::color;
 
 pub struct Wow {
+    args: Vec<String>,
     config: Config,
     working_space: String,
 }
@@ -14,6 +16,7 @@ pub struct Wow {
 impl Wow {
     pub fn new() -> Self {
         Wow {
+            args: vec![],
             config: Config::default(),
             working_space: String::new(),
         }
@@ -27,16 +30,20 @@ impl Wow {
         }
 
         let args: Vec<String> = std::env::args().collect();
-        match args.get(1) {
+        self.args = args;
+        match self.args.get(1) {
             Some(a) => match a.as_str() {
                 "help" => {
                     self.print_help();
                 }
+                "update" => {
+                    self.try_update(true).await.print_err();
+                }
                 "freq" => {
-                    self.set_update_frequance();
+                    self.set_update_frequance().print_err();
                 }
                 "from" => {
-                    self.set_img_souce();
+                    self.set_img_souce().print_err();
                 }
                 "tip" => {
                     self.show_tip_code();
@@ -49,7 +56,7 @@ impl Wow {
                 }
             },
             None => {
-                self.try_update().await.print_err();
+                self.try_update(false).await.print_err();
             }
         }
     }
@@ -93,67 +100,196 @@ impl Wow {
     }
 
     fn print_help(&self) {
-        println!("{}命令列表/command list", color::Fg(color::LightGreen),);
+        println!("{}命令列表", color::Fg(color::LightGreen),);
         println!(
-            "  {}help{}  - 显示此帮助信息｜show help info",
+            "  {}help{}    - 显示此帮助信息",
             color::Fg(color::Yellow),
             color::Fg(color::LightMagenta)
         );
         println!(
-            "  {}freq{}  - 设置壁纸更新频率｜set update frequency",
+            "  {}update{}  - 更新壁纸",
             color::Fg(color::Yellow),
             color::Fg(color::LightMagenta)
         );
         println!(
-            "  {}from{}  - 设置壁纸图片来源｜set the source of wallpaper",
+            "  {}freq{}    - 设置壁纸更新频率",
             color::Fg(color::Yellow),
             color::Fg(color::LightMagenta)
         );
         println!(
-            "  {}bye{}   - 卸载程序｜safely delete this app",
+            "  {}from{}    - 设置壁纸图片来源",
             color::Fg(color::Yellow),
             color::Fg(color::LightMagenta)
         );
         println!(
-            "  {}tip{}   - 打赏｜encourage",
+            "  {}bye{}     - 卸载程序",
             color::Fg(color::Yellow),
-            color::Fg(color::Rgb(149, 225, 221))
+            color::Fg(color::LightMagenta)
+        );
+        println!(
+            "  {}tip{}     - 赞赏",
+            color::Fg(color::Yellow),
+            color::Fg(color::Rgb(53, 92, 125))
         );
         println!();
 
         println!(
-            "{}当前配置｜current config{}",
+            "{}当前配置{}",
             color::Fg(color::LightGreen),
             color::Fg(color::Reset)
         );
         println!(
-            "  图片来源(image source): {}{}{}",
+            "  图片来源: {}{}{}",
             color::Fg(color::LightCyan),
             match self.config.get_url() {
-                "https://bing.img.run/rand_uhd.php" => "    必应随机历史图片｜bing random image",
-                "https://bing.img.run/uhd.php" => "必应每日图片｜bing every-day image",
+                "https://bing.img.run/rand_uhd.php" => "必应随机历史图片",
+                "https://bing.img.run/uhd.php" => "必应每日图片",
                 _ => "未知来源｜unknow",
             },
             color::Fg(color::Reset)
         );
         println!(
-            "  更新频率(update frequency): {}每{}小时｜every {} hours{}",
+            "  更新频率: {}每{}小时{}",
             color::Fg(color::LightCyan),
-            self.config.get_freq(),
-            self.config.get_freq(),
+            self.config.get_freq() / 3600,
             color::Fg(color::Reset)
         );
         println!("{}", color::Fg(color::Reset));
     }
 
-    fn set_update_frequance(&self) -> ErrInfo {
-        println!("set freq");
-        ErrInfo::empty()
+    fn set_update_frequance(&mut self) -> ErrInfo {
+        let mut print_info = || {
+            let time_now = SystemTime::now();
+            let time_updated = self.config.get_update_at();
+            match SystemTime::now().duration_since(time_updated) {
+                Ok(d) => {
+                    let freq_in_config = self.config.get_freq(); // 秒
+                    let left_secs = freq_in_config - d.as_secs() as usize;
+
+                    let hour = left_secs / 3600;
+                    let left_secs = left_secs % 3600;
+                    let min = left_secs / 60;
+                    let sec = left_secs % 60;
+                    println!(
+                        "当前更新频率:  {}每{}小时{}",
+                        color::Fg(color::LightBlue),
+                        self.config.get_freq() as f32 / 3600.0,
+                        color::Fg(color::Reset)
+                    );
+                    println!(
+                        "下次更新在 {}{}小时{}分钟{}秒 {}后",
+                        color::Fg(color::LightBlue),
+                        hour,
+                        min,
+                        sec,
+                        color::Fg(color::Reset)
+                    );
+                    ErrInfo::empty()
+                }
+                Err(e) => {
+                    self.config.set_update_at(time_now);
+                    self.config
+                        .flush(&(self.working_space.clone() + "/wow.conf"));
+                    ErrInfo::new(&format!(
+                        "{}\n{}已重置时间{}",
+                        e,
+                        color::Fg(color::LightRed),
+                        color::Fg(color::Reset)
+                    ))
+                }
+            }
+        };
+        let mut print_help = || {
+            println!(
+                "{}设置壁纸更新频率{}",
+                color::Fg(color::LightGreen),
+                color::Fg(color::Reset),
+            );
+            println!(
+                "{}usage:{} wow freq x    --  x > 0",
+                color::Fg(color::LightRed),
+                color::Fg(color::Reset)
+            );
+            println!(
+                "{}eg:{}    wow freq 2.5  --  设置更新频率为每2.5小时",
+                color::Fg(color::LightRed),
+                color::Fg(color::Reset)
+            );
+
+            println!();
+
+            print_info()
+        };
+        match self.args.get(2) {
+            Some(a) => {
+                if self.args.get(3).is_some() {
+                    print_help()
+                } else {
+                    let freq = match a.parse::<f32>() {
+                        Ok(f) => f,
+                        Err(e) => {
+                            println!("{}", e);
+                            return print_help();
+                        }
+                    };
+                    // FIXME: 限制范围
+                    if freq > 0.0 {
+                        self._set_update_frequance(freq)
+                    } else {
+                        print_help()
+                    }
+                }
+            }
+            None => print_help(),
+        }
     }
 
-    fn set_img_souce(&self) -> ErrInfo {
-        println!("set source");
-        ErrInfo::empty()
+    fn _set_update_frequance(&mut self, f: f32) -> ErrInfo {
+        let f = f * 3600.0;
+        self.config.set_freq(f as usize);
+        self.config
+            .flush(&(self.working_space.clone() + "/wow.conf"))
+    }
+
+    fn set_img_souce(&mut self) -> ErrInfo {
+        let print_help = || {
+            println!(
+                "{}设置壁纸图片来源{}",
+                color::Fg(color::LightGreen),
+                color::Fg(color::Reset),
+            );
+            println!(
+                "{}usage:{} wow from x    --  x = 1 or 2",
+                color::Fg(color::LightRed),
+                color::Fg(color::Reset)
+            );
+            println!("1  -> 必应随机历史图片");
+            println!("2  -> 必应每日图片");
+        };
+        match self.args.get(2) {
+            Some(s) => {
+                if self.args.get(3).is_some() {
+                    print_help();
+                    ErrInfo::empty()
+                } else {
+                    let s = match s.parse::<u8>() {
+                        Ok(s) => s,
+                        Err(e) => {
+                            // println!("{}", e);
+                            print_help();
+                            return ErrInfo::new(&format!("{}", e));
+                        }
+                    };
+                    self.config.set_url(s);
+                    self.config
+                        .flush(&(self.working_space.clone() + "/wow.conf"))
+                }
+            }
+            None => {
+                print_help();
+                ErrInfo::empty()
+            }
+        }
     }
 
     fn show_tip_code(&self) {
@@ -204,36 +340,39 @@ impl Wow {
     }
 
     fn self_remove(&self) {
-        println!("byyyyyyye");
+        println!("TODO");
+        println!("请手动删除{}", self.working_space);
     }
 
-    async fn try_update(&mut self) -> ErrInfo {
+    async fn try_update(&mut self, anyway: bool) -> ErrInfo {
         // 读取配置
-        //
         // 检查更新时间
         let time_now = SystemTime::now();
         let time_update = self.config.get_update_at();
         match time_now.duration_since(time_update) {
             Ok(d) => {
-                if d >= Duration::from_secs(self.config.get_freq() as u64 * 60 * 60) {
-                    let res = self.update_paper().await;
+                if anyway || d >= Duration::from_secs(self.config.get_freq() as u64 * 60 * 60) {
+                    println!("更新中...");
+                    let res = self.update_paper(time_now).await;
                     if res.is_empty() {
+                        // sync_update_time(time_now);
                         self.config.set_update_at(time_now);
                         self.config
                             .flush(&(self.working_space.clone() + "/wow.conf"));
+                        return ErrInfo::new("壁纸已更新");
                     }
-                    return res;
+                    res
                 } else {
-                    println!("not the time");
+                    ErrInfo::new("not the time")
                 }
             }
             Err(e) => {
-                return ErrInfo::new(&format!("{}", e));
+                self.config.set_update_at(time_now);
+                self.config
+                    .flush(&(self.working_space.clone() + "/wow.conf"));
+                ErrInfo::new(&format!("{}\n已重置时间", e))
             }
         }
-        // 是否需要更新
-        //
-        ErrInfo::empty()
     }
 
     /// 根据配置的图片源，尝试更新图片
@@ -242,7 +381,7 @@ impl Wow {
     /// `当前支持`
     /// - 必应每日图片
     /// - 必应随机历史图片
-    async fn update_paper(&self) -> ErrInfo {
+    async fn update_paper(&mut self, t: SystemTime) -> ErrInfo {
         let client = reqwest::Client::new();
 
         let img_url = self.config.get_url();
@@ -255,13 +394,15 @@ impl Wow {
             Ok(resp) => resp.url().clone().to_string(),
         };
 
-        let save_path = self.working_space.clone() + "/today.jpg";
+        let stamp = t
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or(Duration::from_secs(114514))
+            .as_secs()
+            .to_string();
+
+        let save_path = self.working_space.clone() + "/" + &stamp + ".jpg";
         match client.get(real_url).send().await {
-            Err(e) => {
-                return ErrInfo {
-                    info: format!("fetch image error:\n{}", e),
-                };
-            }
+            Err(e) => ErrInfo::new(&format!("fetch image error:\n{}", e)),
             Ok(resp) => {
                 let mut fs = match File::create(&save_path) {
                     Ok(f) => f,
@@ -272,23 +413,28 @@ impl Wow {
                     }
                 };
                 match resp.bytes().await {
-                    Err(e) => {
-                        return ErrInfo {
-                            info: format!("error when read image data:\n{}", e),
-                        };
-                    }
+                    Err(e) => ErrInfo::new(&format!("error when read image data:\n{}", e)),
                     Ok(data) => match fs.write_all(&data) {
-                        Ok(_) => {}
-                        Err(e) => {
-                            return ErrInfo {
-                                info: format!("error when saving image:\n{}", e),
-                            };
+                        Ok(_) => {
+                            self.delete_pre_img();
+                            self.config.set_cur_img(&save_path);
+                            match Command::new(self.working_space.clone() + "/updater")
+                                .arg(save_path)
+                                .status()
+                            {
+                                Ok(_) => ErrInfo::empty(),
+                                Err(e) => ErrInfo::new(&format!("{}\n设置壁纸失败", e)),
+                            }
                         }
+                        Err(e) => ErrInfo::new(&format!("error when saving image:\n{}", e)),
                     },
                 }
             }
         }
-        ErrInfo::empty()
+    }
+
+    fn delete_pre_img(&self) {
+        if fs::remove_file(self.config.get_cur_img()).is_err() {}
     }
 }
 
