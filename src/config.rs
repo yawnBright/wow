@@ -13,15 +13,19 @@ pub struct Config {
     freq: usize,
     update_at: SystemTime,
     cur_img: String,
+    pub ask_stop: bool,
+    pub working: bool,
 }
 
 impl Config {
     pub fn default() -> Self {
         Config {
             source: 1,
-            freq: 12 * 60 * 60,
+            freq: 4 * 60 * 60,
             update_at: SystemTime::now(),
             cur_img: String::new(),
+            ask_stop: false,
+            working: false,
         }
     }
     /// 从`path`加载配置文件，

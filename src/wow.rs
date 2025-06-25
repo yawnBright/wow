@@ -6,6 +6,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 use termion::color;
+use tokio::time::sleep;
 
 pub struct Wow {
     args: Vec<String>,
@@ -23,10 +24,15 @@ impl Wow {
     }
 
     pub async fn run(&mut self) {
+        let err = self.init_workspace();
+        if !err.is_empty() {
+            err.print_err();
+            return;
+        }
+
         let load_err = self.load_config();
         if !load_err.is_empty() {
             load_err.print_err();
-            return;
         }
 
         let args: Vec<String> = std::env::args().collect();
@@ -35,6 +41,12 @@ impl Wow {
             Some(a) => match a.as_str() {
                 "help" => {
                     self.print_help();
+                }
+                "run" => {
+                    self._run().await;
+                }
+                "stop" => {
+                    self._stop();
                 }
                 "update" => {
                     self.try_update(true).await.print_err();
@@ -61,13 +73,59 @@ impl Wow {
         }
     }
 
-    fn load_config(&mut self) -> ErrInfo {
-        match std::env::current_exe() {
-            Err(e) => {
-                return ErrInfo {
-                    info: format!("can't access current working space:\n{}", e),
-                };
+    async fn _run(&mut self) {
+        let config_path = self.working_space.clone() + "/wow.conf";
+        self.config.load(&config_path);
+        if self.config.working {
+            println!("wow已在运行中");
+            return;
+        }
+
+        self.config.ask_stop = false;
+        self.config.working = true;
+        let config_path = self.working_space.clone() + "/wow.conf";
+        let mut err = self.config.flush(&config_path);
+        if !err.is_empty() {
+            err.print_err();
+            self.config = Config::default();
+            self.config.flush(&config_path);
+            return;
+        }
+
+        loop {
+            self.try_update(false).await.print_err();
+
+            sleep(Duration::from_secs(30)).await;
+
+            err = self.load_config();
+            if !err.is_empty() {
+                err.print_err();
+                self.config = Config::default();
+                self.config.flush(&config_path);
+                return;
             }
+            if self.config.ask_stop {
+                println!("退出");
+                break;
+            }
+        }
+    }
+
+    pub fn _stop(&mut self) {
+        let config_path = self.working_space.clone() + "/wow.conf";
+        self.config.ask_stop = true;
+        self.config.working = false;
+        let err = self.config.flush(&config_path);
+        if !err.is_empty() {
+            err.print_err();
+            self.config = Config::default();
+            self.config.flush(&config_path);
+        }
+    }
+
+    fn init_workspace(&mut self) -> ErrInfo {
+        match std::env::current_exe() {
+            Err(e) => ErrInfo::new(&format!("can't access current working space:\n{}", e)),
             Ok(e) => {
                 let w_space = match e.parent() {
                     Some(p) => match p.to_str() {
@@ -85,8 +143,12 @@ impl Wow {
                     }
                 };
                 self.working_space = w_space;
+                ErrInfo::empty()
             }
         }
+    }
+
+    fn load_config(&mut self) -> ErrInfo {
         let mut _config = Config::default();
         let conf_path = self.working_space.clone() + "/wow.conf";
         if _config.load(&conf_path) {
@@ -107,6 +169,16 @@ impl Wow {
             color::Fg(color::LightMagenta)
         );
         println!(
+            "  {}run{}     - 开启自动更新",
+            color::Fg(color::Yellow),
+            color::Fg(color::LightMagenta)
+        );
+        println!(
+            "  {}stop{}    - 关闭自动更新",
+            color::Fg(color::Yellow),
+            color::Fg(color::LightMagenta)
+        );
+        println!(
             "  {}update{}  - 更新壁纸",
             color::Fg(color::Yellow),
             color::Fg(color::LightMagenta)
@@ -117,7 +189,7 @@ impl Wow {
             color::Fg(color::LightMagenta)
         );
         println!(
-            "  {}from{}    - 设置壁纸图片来源",
+            "  {}from{}    - 选择壁纸图片来源",
             color::Fg(color::Yellow),
             color::Fg(color::LightMagenta)
         );
@@ -149,9 +221,10 @@ impl Wow {
             color::Fg(color::Reset)
         );
         println!(
-            "  更新频率: {}每{}小时{}",
+            "  更新频率: {}每{}小时{}分{}",
             color::Fg(color::LightCyan),
             self.config.get_freq() / 3600,
+            (self.config.get_freq() % 3600) / 60,
             color::Fg(color::Reset)
         );
         println!("{}", color::Fg(color::Reset));
@@ -164,7 +237,12 @@ impl Wow {
             match SystemTime::now().duration_since(time_updated) {
                 Ok(d) => {
                     let freq_in_config = self.config.get_freq(); // 秒
-                    let left_secs = freq_in_config - d.as_secs() as usize;
+
+                    let dif = freq_in_config as isize - d.as_secs() as isize;
+                    let mut left_secs = freq_in_config - d.as_secs() as usize;
+                    if dif < 0 {
+                        left_secs = 0;
+                    }
 
                     let hour = left_secs / 3600;
                     let left_secs = left_secs % 3600;
@@ -184,6 +262,10 @@ impl Wow {
                         sec,
                         color::Fg(color::Reset)
                     );
+                    if dif < 0 {
+                        println!(":( 错过了更新\n将在下次更新时再次尝试");
+                    }
+                    println!("使用`wow update`手动更新");
                     ErrInfo::empty()
                 }
                 Err(e) => {
@@ -234,7 +316,11 @@ impl Wow {
                     };
                     // FIXME: 限制范围
                     if freq > 0.0 {
-                        self._set_update_frequance(freq)
+                        let err = self._set_update_frequance(freq);
+                        if err.is_empty() {
+                            println!("设置成功");
+                        }
+                        err
                     } else {
                         print_help()
                     }
@@ -345,13 +431,14 @@ impl Wow {
     }
 
     async fn try_update(&mut self, anyway: bool) -> ErrInfo {
+        println!("准备更新");
         // 读取配置
         // 检查更新时间
         let time_now = SystemTime::now();
         let time_update = self.config.get_update_at();
         match time_now.duration_since(time_update) {
             Ok(d) => {
-                if anyway || d >= Duration::from_secs(self.config.get_freq() as u64 * 60 * 60) {
+                if anyway || d >= Duration::from_secs(self.config.get_freq() as u64) {
                     println!("更新中...");
                     let res = self.update_paper(time_now).await;
                     if res.is_empty() {
@@ -363,7 +450,7 @@ impl Wow {
                     }
                     res
                 } else {
-                    ErrInfo::new("not the time")
+                    ErrInfo::new("未到更新时间\n使用`wow update`手动更新\n使用`wow help`获取帮助")
                 }
             }
             Err(e) => {

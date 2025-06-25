@@ -36,27 +36,6 @@ else
   exit
 fi
 
-# 定义新的定时任务
-NEW_CRON="*/5 * * * * $bin" # 每5分钟执行一次
-
-# 临时文件存储现有crontab
-TEMP_CRON=$(mktemp)
-
-# 保存现有crontab（如果有）
-crontab -l >"$TEMP_CRON" 2>/dev/null
-
-# 检查任务是否已存在，避免重复添加
-if ! grep -q "$NEW_CRON" "$TEMP_CRON"; then
-  echo "$NEW_CRON" >>"$TEMP_CRON"
-  crontab "$TEMP_CRON"
-  echo "已添加定时任务：$NEW_CRON"
-else
-  echo "任务已存在，跳过添加"
-fi
-
-# 清理临时文件
-rm "$TEMP_CRON"
-
 # 添加环境变量
 CONFIG_FILE="$HOME/.bashrc"
 if [[ "$SHELL" == *"zsh"* ]]; then
@@ -65,4 +44,14 @@ fi
 
 touch "$CONFIG_FILE"
 
-echo "export PATH=$proj_path:$PATH" >>"$CONFIG_FILE"
+echo "export PATH=\"$proj_path:\$PATH\"" >>"$CONFIG_FILE"
+
+echo ""
+echo "安装路径: $proj_path"
+echo "使用：\`source $CONFIG_FILE\` 来激活环境变量"
+
+touch "$proj_path/wow-run"
+echo "nohup $bin run >/dev/null 2>&1 &" >"$proj_path/wow-run"
+chmod +x "$proj_path/wow-run"
+
+echo "使用\`wow-run\`开启自动更新"
